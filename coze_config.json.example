@@ -1,0 +1,5 @@
+{
+  "workflow_id": "your_workflow_id_here",
+  "token": "your_token_here",
+  "api_base_url": "https://api.coze.cn/v1"
+}
