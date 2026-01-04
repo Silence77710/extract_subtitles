@@ -25,6 +25,10 @@ python3 -m venv venv
 # 激活虚拟环境
 source venv/bin/activate
 
+# 升级 pip 到最新版本
+echo "正在升级 pip..."
+python3 -m pip install --upgrade pip
+
 # 安装 Python 依赖
 echo "正在安装 Python 依赖..."
 pip install -r requirements.txt

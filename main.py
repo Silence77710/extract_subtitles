@@ -14,19 +14,23 @@ import sys
 import json
 import re
 import requests
+import traceback
 
 try:
     from flask import Flask, request, jsonify, send_file, Response
+    from flask_cors import CORS
 except ImportError:
     print("错误: 找不到 Flask 模块。请确保已安装依赖:")
     print("1. 运行 ./install.sh 脚本，或")
-    print("2. 手动安装: pip install flask")
+    print("2. 手动安装: pip install flask flask-cors")
     sys.exit(1)
 
 # 导入配置
 from config import Config
 
 app = Flask(__name__)
+# 启用 CORS 支持，允许所有来源
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # 创建存储字幕的目录
 SUBTITLES_DIR = Config.SUBTITLES_DIR
@@ -158,6 +162,18 @@ def download_subtitle(url, lang='en', browser=None, cookies_file=None):
                     "支持的浏览器: chrome, firefox, safari, edge\n"
                     "或者导出 cookies 文件并提供路径。"
                 )
+            # 检查是否是浏览器 cookies 数据库未找到的错误
+            if "could not find" in error_msg.lower() and "cookies database" in error_msg.lower():
+                if browser:
+                    raise Exception(
+                        f"无法从浏览器 '{browser}' 获取 cookies。\n"
+                        "浏览器 cookies 数据库未找到或无法访问。\n"
+                        "建议解决方案：\n"
+                        "1. 使用浏览器扩展（如 'Get cookies.txt'）导出 YouTube 的 cookies\n"
+                        "2. 将 cookies 文件保存到项目的 cookies/ 目录\n"
+                        "3. 在请求中使用 'cookies_file' 参数而不是 'browser' 参数\n"
+                        f"原始错误: {error_msg}"
+                    )
             raise Exception(f"下载失败: {error_msg}")
         
         # 查找下载的文件
@@ -209,11 +225,11 @@ def send_to_coze_workflow(workflow_id, token, cleaned_text, file_name):
         
         print(f"正在发送请求到 Coze API: {api_url}")
         print(f"请求头: {headers}")
-        # 为了避免日志太长，只打印部分数据
-        print(f"请求数据: {{'workflow_id': {workflow_id}, 'parameters': {{'subtitle': '{cleaned_text[:100]}{'...' if len(cleaned_text) > 100 else ''}'}}}}")
+        # 打印完整请求数据
+        print(f"请求数据: {json.dumps(payload, ensure_ascii=False, indent=2)}")
         
         # 发送 POST 请求到 Coze API
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        response = requests.post(api_url, headers=headers, json=payload, timeout=200)
         
         print(f"Coze API 响应状态码: {response.status_code}")
         print(f"Coze API 响应头: {dict(response.headers)}")
@@ -252,7 +268,25 @@ def handle_download_request():
     处理下载字幕的请求
     """
     try:
+        # 打印请求信息以便调试
+        print(f"\n收到 /download-subtitle 请求")
+        print(f"请求方法: {request.method}")
+        print(f"Content-Type: {request.content_type}")
+        
         data = request.json
+        if data is None:
+            print("警告: request.json 为 None，尝试解析原始数据")
+            if request.data:
+                try:
+                    data = json.loads(request.data)
+                except json.JSONDecodeError as e:
+                    print(f"无法解析 JSON 数据: {e}")
+                    return jsonify({"error": f"无效的 JSON 数据: {str(e)}"}), 400
+            else:
+                return jsonify({"error": "请求体为空"}), 400
+        
+        print(f"请求数据: {json.dumps(data, ensure_ascii=False, indent=2)}")
+        
         url = data.get('url')
         lang = data.get('lang', 'en')
         browser = data.get('browser')  # 浏览器名称，如 'chrome', 'firefox'
@@ -359,6 +393,14 @@ def handle_download_request():
         return jsonify(result)
         
     except Exception as e:
+        # 打印异常信息以便调试
+        print(f"\n{'='*60}")
+        print(f"异常发生在 /download-subtitle 端点:")
+        print(f"异常类型: {type(e).__name__}")
+        print(f"异常信息: {str(e)}")
+        print(f"\n完整堆栈跟踪:")
+        traceback.print_exc()
+        print(f"{'='*60}\n")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
@@ -565,7 +607,9 @@ def main(url=None, lang='en', return_result=False):
             print(f"  Coze 工作流已配置 (ID: {Config.COZE_WORKFLOW_ID[:10]}...)")
         else:
             print("  Coze 工作流未配置")
-        app.run(host='0.0.0.0', port=5001, debug=True)
+        # 根据环境变量决定是否启用 debug 模式
+        debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+        app.run(host='0.0.0.0', port=5001, debug=debug_mode)
 
 if __name__ == '__main__':
     main()
